@@ -1,0 +1,75 @@
+---
+title: "Multivariable Logistic Regression Analysis of Diabetes and Modifiable Risk Factors for Heart Disease: 2022 BRFSS Data"
+author: "Claire Xu"
+bibliography: references_heart_disease.bib
+format:
+  pdf:
+    documentclass: article
+    geometry:
+      - margin=0.5in
+    fontsize: 12pt
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+```{r}
+#| label: setup
+
+library(tidyverse)
+setwd("/Users/clairexu/Desktop/Heart Disease Project/csv files/2022")
+heart <- read_csv("heart_2022_no_nans.csv")
+```
+
+### Background
+
+Cardiovascular disease (CVD) remains the leading cause of death in the United States and continues to represent a major public health burden due to its high prevalence, mortality, and associated healthcare costs [@yang2019;@leal2024]. Established risk factors for heart disease include diabetes, smoking, obesity, physical inactivity, and other behavioral and demographic characteristics [@yang2019;@leal2024]. Although many of these risk factors are well documented, their relative contributions may vary across populations and may be influenced by clinical, lifestyle, and socioeconomic factors. Large-scale surveillance systems such as the Behavioral Risk Factor Surveillance System (BRFSS) have been widely used to study cardiovascular risk factors in population-based samples [@leal2024;@shah2025]. Identifying factors associated with heart disease using large population health data can support prevention efforts and inform evidence-based public health interventions.
+
+
+### Research Questions
+
+#### Primary Research Question
+Is diabetes associated with higher odds of heart disease after adjusting 
+for age, sex, BMI, and smoking status?
+
+*Hypothesis:* Adults who report a diabetes diagnosis will have a higher odds of heart disease compared to non-diabetic adults, after adjusting for age, sex, BMI, and smoking.
+
+#### Secondary Research Questions
+1. Does physical inactivity independently predict heart disease after adjusting for BMI and age?
+
+*Hypothesis:* Physically inactive adults will have higher odds of having heart disease compared to active adults, even after controlling for BMI and age category.
+
+2. Is the association between smoking and heart disease modified by age group?
+
+*Hypothesis:* The positive association between smoking status and heart disease will be stronger in older age groups, reflecting long-term exposure effects over time.
+
+3. Is general health status associated with heart disease after adjusting for behavioral and clinical factors?
+
+*Hypothesis:* Adults reporting poor or fair general health will have higher odds of having heart disease compared to those reporting excellent health, with the odds increasing across self-reported health categories from excellent to very good, good, fair, and poor, even after adjusting for BMI, smoking status, diabetes, and physical activity.
+
+### Data Source
+
+This study uses the Indicators of Heart Disease dataset (2022), derived from 
+the Behavioral Risk Factor Surveillance System (BRFSS), administered by the 
+Centers for Disease Control and Prevention [@cdc_brfss]. The data were accessed 
+through Kaggle [@kaggle_dataset] and contain a cleaned subset of 41 variables 
+and 246,022 observations selected from the original BRFSS survey, which includes over 300 variables capturing demographic characteristics, health behaviors, and 
+chronic conditions related to cardiovascular health. Because the dataset contains no missing values, all 246,022 observations are included in the analysis.
+  
+The outcome variable, HeartDisease, is a binary indicator recoded from the survey item HadHeartAttack, which asks respondents whether they have ever been told by a doctor that they had a heart attack.
+
+### Planned Statistical Methods
+
+Descriptive statistics will be used to summarize the study population overall and stratified by heart disease status. Continuous variables such as BMI and sleep duration will be described using means and standard deviations or medians and interquartile ranges, depending on their distribution, while categorical variables such as sex, diabetes status, smoking status, and physical activity will be summarized using frequencies and percentages. Initial univariable analyses will be conducted using chi-square tests and t-tests to assess crude associations.
+
+Logistic regression will be used to assess the association between diabetes and heart disease, the primary exposure of interest [@yang2019;@shah2025;@yathindra2025]. Both unadjusted and multivariable models will be fit to estimate crude and adjusted odds ratios (ORs) with 95% confidence intervals. The adjusted model will include key demographic and clinical covariates, including age, sex, BMI, and smoking status, to control for confounding. To address the third secondary research question, a multiplicative interaction term between smoking status and age group will be included in a separate model to formally test whether the association between smoking and heart disease differs across age categories.
+
+Model performance will be evaluated using receiver operating characteristic (ROC) curve analysis, with the area under the curve (AUC) used to assess model discrimination. Sensitivity, specificity, and internal validation using resampling methods will also be considered. All analyses will be conducted in R, using the tidyverse suite for data management, glm() for logistic regression, and pROC for ROC/AUC estimation, with the report written in Quarto to ensure full reproducibility.
+
+### Relevance to Biostatistics
+
+This project reflects applied biostatistical work in public health, using a 246,000+ record observational dataset from the Behavioral Risk Factor Surveillance System (BRFSS), a federally administered surveillance system widely used in epidemiologic research, to evaluate the independent association between diabetes and heart disease. The analysis mirrors how biostatisticians translate clinical questions into statistical models, including defining exposures, outcomes, and potential confounders in large-scale health data.
+
+The project emphasizes core elements of applied biostatistical practice, including multivariable logistic regression, confounder adjustment, interaction assessment, and model discrimination using ROC/AUC. These methods align with foundational graduate-level coursework in generalized linear models and applied regression. Analytic decisions in the presence of confounding, class imbalance, and self-reported variables reflect common challenges in observational health data analysis. Results are communicated using odds ratios and confidence intervals to support clear interpretation for public health audiences.
+
+### References
