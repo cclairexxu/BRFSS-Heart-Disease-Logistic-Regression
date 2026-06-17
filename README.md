@@ -5,6 +5,11 @@ Analyzed 246,000+ U.S. adult records from the 2022 CDC BRFSS dataset to examine 
 
 ## Files
 - [Heart Disease Analysis Proposal.qmd](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart%20Disease%20Analysis%20Proposal.qmd) – Quarto source file for the project proposal
+  
 - [Heart Disease Analysis Proposal.pdf](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart-Disease-Analysis-Proposal.pdf) – Project proposal outlining research questions, hypotheses, data source, and planned methods
+  
+- [Heart Disease Analysis Code.html](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart_Disease_Analysis_Code.html) - Rendered HTML report containing the full analysis, code, results, tables, and figures.
+**File is too big to be previewed in Github, please download the file to preview**
+
 - [references.bib](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/references_heart_disease.bib) – Bibliography file
 
