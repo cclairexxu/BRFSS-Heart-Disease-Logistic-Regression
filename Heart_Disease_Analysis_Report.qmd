@@ -1,0 +1,1432 @@
+---
+title: "Multivariable Logistic Regression Analysis of Diabetes and Modifiable Risk Factors for Heart Disease: 2022 BRFSS Data"
+author: "Claire Xu"
+format:
+  pdf:
+    documentclass: article
+    geometry:
+      - margin= 1 in
+    fontsize: 12pt
+    keep-tex: true
+execute:
+  echo: false
+  warning: false
+  message: false
+bibliography: references_heart_disease.bib
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+library(tidyverse)
+library(gtsummary)
+library(broom)
+library(pROC)
+library(corrplot)
+library(ResourceSelection)
+library(dplyr)
+library(stringr)
+library(knitr)
+library(kableExtra) 
+library(flextable)
+
+# Sets the default ggplot2 theme to a clean black-and-white theme with base font size 10 for all subsequent plots
+theme_set(theme_bw(base_size = 10))  
+
+# Load the data 
+heart <- read_csv("/Users/clairexu/Desktop/Heart Disease Project/csv files/2022/heart_2022_no_nans.csv")
+
+# Recoding/factoring: 
+
+# Recode heart attack status as a binary outcome
+heart <- heart |>
+  mutate(HeartDisease = if_else(HadHeartAttack == "Yes", 1, 0))
+
+# Recode HadDiabetes into binary yes/no
+heart <- heart|>
+  mutate(
+    HadDiabetes_binary = case_when(
+      HadDiabetes == "Yes" ~ "Yes",
+      HadDiabetes == "No" ~ "No",
+      HadDiabetes == "No, pre-diabetes or borderline diabetes" ~ "No",
+      HadDiabetes == "Yes, but only during pregnancy (female)" ~ NA_character_
+    ),
+    HadDiabetes_binary = factor(HadDiabetes_binary, levels = c("No", "Yes"))
+  )
+
+# Recode all remaining covariates as factors
+heart<- heart |>
+  mutate(
+    # factor version of outcome for table display
+    HeartDisease_f = factor(HeartDisease, levels = c(0, 1),
+                            labels = c("No", "Yes")),
+    # Self-reported health (Excellent = reference)
+    GeneralHealth = factor(
+      GeneralHealth,
+      levels = c("Excellent", "Very good",
+                 "Good", "Fair", "Poor")
+    ),
+    
+    # Age groups (youngest group = reference)
+    AgeCategory = factor(
+      AgeCategory,
+      levels = c("Age 18 to 24", "Age 25 to 29",
+                 "Age 30 to 34", "Age 35 to 39",
+                 "Age 40 to 44", "Age 45 to 49",
+                 "Age 50 to 54", "Age 55 to 59",
+                 "Age 60 to 64", "Age 65 to 69",
+                 "Age 70 to 74", "Age 75 to 79",
+                 "Age 80 or older")
+    ),
+    
+    # Smoking history (never smoked = reference)
+    SmokerStatus = factor(
+      SmokerStatus,
+      levels = c("Never smoked",
+                 "Former smoker",
+                 "Current smoker - now smokes every day",
+                 "Current smoker - now smokes some days")
+    ),
+    
+    # Binary covariates
+    PhysicalActivities = factor(PhysicalActivities, levels = c("No", "Yes")),
+    Sex = factor(Sex, levels = c("Female", "Male")),
+    
+    #Race/ethnicity (White only, Non-Hispanic" = reference)
+    RaceEthnicityCategory = factor(
+      RaceEthnicityCategory,
+      levels = c("White only, Non-Hispanic",
+                 "Black only, Non-Hispanic",
+                 "Hispanic",
+                 "Other race only, Non-Hispanic",
+                 "Multiracial, Non-Hispanic")
+    )
+  )
+
+# Create BMI categories using standard WHO cutoffs
+heart <- heart |>
+  mutate(
+    BMICategory = case_when(
+      BMI < 18.5 ~ "Underweight",
+      BMI < 25 ~ "Normal",
+      BMI < 30 ~ "Overweight",
+      BMI >= 30 ~ "Obese"
+    ),
+    # Reference level = Normal
+    BMICategory = factor(
+      BMICategory,
+      levels = c("Normal", "Underweight", "Overweight", "Obese")
+    )
+  )
+
+# Filter out NA values for HadDiabetes before fitting
+heart_complete <- heart |> filter(!is.na(HadDiabetes_binary))
+
+# Setting up all the models:
+# primary model with complete case
+model_rq1 <- glm(
+  HeartDisease ~ HadDiabetes_binary + AgeCategory + Sex + BMI +
+    SmokerStatus,
+  data = heart_complete,
+  family = binomial
+)
+
+# Model specification: 
+
+# Full model with all covariates including optional ones
+model_full <- glm(
+  HeartDisease ~ HadDiabetes_binary + AgeCategory + Sex + BMI +
+    SmokerStatus + PhysicalActivities + GeneralHealth +
+    RaceEthnicityCategory + SleepHours + AlcoholDrinkers +
+    HadDepressiveDisorder + DifficultyWalking,
+  data = heart,
+  family = binomial
+)
+
+# Female only model
+model_female <- glm(HeartDisease ~ HadDiabetes_binary + AgeCategory +
+                      BMI + SmokerStatus,
+                    data = subset(heart_complete, Sex == "Female"),
+                    family = binomial)
+
+# Male only model
+model_male <- glm(HeartDisease ~ HadDiabetes_binary + AgeCategory
+                    + BMI + SmokerStatus, 
+                    data = subset(heart_complete, Sex == "Male"),
+                    family = binomial)
+
+# Predicted probabilities form primary and full model
+pred_rq1 <- predict(model_rq1, type = "response")
+pred_full <- predict(model_full, type = "response")
+
+# ROC curves
+roc_rq1 <- roc(heart_complete$HeartDisease, pred_rq1)
+roc_full <- roc(heart_complete$HeartDisease, pred_full)
+
+# Find the optimal cutoff using Youden's Index
+youden <- coords(
+  roc_rq1,
+  "best",                         
+  best.method = "youden",         
+  ret = c("threshold", "sensitivity", "specificity")          
+)
+
+# Sensitivity analysis:
+
+# Recode HadDiabetes in a full dataset keeping gestational as separate level
+heart_sensitivity <- heart |>
+  mutate(
+    HadDiabetes_3level = case_when(
+      HadDiabetes == "Yes" ~ "Yes",
+      HadDiabetes == "No" ~ "No",
+      HadDiabetes == "No, pre-diabetes or borderline diabetes" ~ "No",
+      HadDiabetes == "Yes, but only during pregnancy (female)" ~ "Gestational"
+    ),
+    HadDiabetes_3level = factor(
+      HadDiabetes_3level,
+      levels = c("No", "Yes", "Gestational")
+    )
+  )
+
+# Refit primary model with 3-level diabetes variable
+model_sensitivity <- glm(
+  HeartDisease ~ HadDiabetes_3level + AgeCategory +
+    Sex + BMI + SmokerStatus,
+  data = heart_sensitivity,
+  family = binomial
+)
+
+# Bootstrap AUC: load saved result instead of rerunning
+boot_auc <- readRDS("boot_auc.rds")
+
+
+# Setting up dataframes:
+
+# Add fitted values and residuals to a data frame
+# Run diagnostics for the primary model
+model_rq1_diag <- data.frame(
+  fitted = fitted(model_rq1),
+  deviance_resid = residuals(model_rq1, type = "deviance"),
+  pearson_resid = residuals(model_rq1, type = "pearson")
+)
+
+# Create data frame for forest plot
+coef_table <- summary(model_rq1)$coefficients
+OR <- exp(coef(model_rq1))
+lower <- exp(coef(model_rq1) - 1.96 * coef_table[, "Std. Error"])
+upper <- exp(coef(model_rq1) + 1.96 * coef_table[, "Std. Error"])
+
+forest_data <- data.frame(
+  variable = names(OR),
+  OR = OR,
+  lower = lower,
+  upper = upper
+)
+
+# Compute influence measures in dataframe
+influence_measures <- data.frame(
+  cooks = cooks.distance(model_rq1),
+  hat = hatvalues(model_rq1)
+)
+
+```
+
+# Abstract
+
+Heart disease remains one of the leading causes of morbidity and
+mortality in the United States, making the identification of major risk
+factors an important public health objective. This study used data from
+the 2022 Behavioral Risk Factor Surveillance System (BRFSS) to examine
+the association between diabetes and heart disease while accounting for
+demographic and behavioral risk factors. The full dataset included
+246,022 respondents. The primary analysis used a complete-case sample of
+244,039 participants after excluding 1,983 respondents with missing
+diabetes values created during the recoding of gestational diabetes.
+
+Multivariable logistic regression was used to estimate crude and
+adjusted odds ratios (ORs), along with 95% confidence intervals (CIs).
+Additional analyses examined physical activity, smoking, self-reported
+general health, and whether the association between smoking and heart
+disease differed by age. Model performance was evaluated using the
+receiver operating characteristic (ROC) curve, with the area under the
+curve (AUC) used to summarize the model's ability to correctly
+distinguish between participants with and without heart disease.
+Internal validation was performed using bootstrap resampling to evaluate
+how well the model would generalize to similar populations. Diabetes was
+independently associated with more than twice the odds of heart disease
+(adjusted OR = 2.339, 95% CI: 2.247–2.435). A sensitivity analysis that
+included respondents with gestational diabetes produced nearly identical
+results (adjusted OR = 2.340, 95% CI: 2.248–2.436), indicating that the
+primary findings were robust. Older age, male sex, current smoking,
+physical inactivity, and poorer self-reported general health were also
+significantly associated with higher odds of heart disease. The primary
+model showed good predictive performance (AUC = 0.786), and bootstrap
+validation showed minimal optimism, suggesting little evidence of
+overfitting. Overall, these findings reinforce diabetes as a strong
+independent predictor of heart disease and emphasize the importance of
+prevention, early detection, and management of modifiable cardiovascular
+risk factors.
+
+# Introduction
+
+Cardiovascular disease (CVD), especially coronary heart disease (CHD),
+remains the leading cause of death in the United States, representing a
+major public health burden due to its high prevalence, mortality, and
+associated healthcare costs [@shah2025]. Established risk factors for
+heart disease include diabetes, smoking, obesity, physical inactivity,
+and other behavioral and demographic characteristics [@leal2024]. While
+these risk factors are well documented, their relative contributions can
+vary across populations depending on clinical, lifestyle, and
+socioeconomic factors. Prior BRFSS-based research found that adults with
+diabetes alone (without co-occurring metabolic syndrome) had higher odds
+of heart attack compared to those with neither diabetes nor metabolic
+syndrome, even after adjusting for demographic and behavioral
+confounders [@yang2019].
+
+Large surveillance systems such as the Behavioral Risk Factor
+Surveillance System (BRFSS) are widely used to study cardiovascular risk
+factors in population-based samples [@yang2019; @leal2024; @shah2025;
+@yathindra2025]. The BRFSS dataset has a large sample size, which helps
+detect small effects and compare different subgroups. However, it also
+has limitations, including reliance on self-reported measures for both
+exposures and outcomes, as well as its cross-sectional design, which
+prevents determination of temporal ordering. Even with these
+limitations, large population health datasets such as BRFSS can support
+prevention efforts and inform public health interventions when
+interpreted alongside existing literature.
+
+This study uses 2022 BRFSS data to examine whether diabetes is
+associated with higher odds of heart disease after adjusting for age,
+sex, BMI, and smoking status. It is hypothesized that adults with a
+diabetes diagnosis will have higher odds of heart disease than
+non-diabetic adults after adjustment, consistent with prior BRFSS
+research linking diabetes to elevated cardiovascular risk [@yang2019].
+
+Three secondary questions were also examined. First, whether physical
+inactivity independently predicts heart disease after adjusting for BMI
+and age, given evidence that behavioral risk factors including physical
+inactivity are associated with elevated cardiovascular odds [@shah2025].
+Second, whether the association between smoking and heart disease
+differs by age group, with the expectation that this association is
+stronger among older adults due to cumulative exposure, building on
+findings that smoking-related cardiovascular risk varies meaningfully
+across age groups [@yathindra2025]. Third, whether general health status
+is associated with heart disease after adjusting for behavioral and
+clinical factors, with the expectation that odds increase progressively
+from excellent to poor self-reported health.
+
+The objective of this study is to estimate these associations using
+multivariable logistic regression on a large population-based sample,
+evaluate model performance, and interpret the results in the context of
+existing literature on cardiovascular risk.
+
+# Data and Methods
+
+## Data Source
+
+This study uses the *Indicators of Heart Disease* dataset (2022),
+derived from the Behavioral Risk Factor Surveillance System (BRFSS),
+administered by the Centers for Disease Control and Prevention
+[@cdc_brfss]. The data were accessed through Kaggle [@kaggle_dataset]
+and contain a cleaned subset of 41 variables and 246,022 observations
+selected from the original BRFSS survey, which includes over 300
+variables capturing demographic characteristics, health behaviors, and
+chronic conditions related to cardiovascular health. The dataset
+contains no missing values, so all 246,022 observations were initially
+available for analysis.
+
+## Study Population
+
+The study population consists of U.S. adults aged 18 and older who
+participated in the 2022 BRFSS telephone survey. For the primary and
+subgroup analysis, 1,983 respondents who reported diabetes only during
+pregnancy were excluded, as gestational diabetes is a distinct clinical
+condition from diabetes diagnoses of interest in this study and was
+similarly excluded in prior BRFSS-based research [@yang2019].
+Respondents reporting pre-diabetes or borderline diabetes were retained
+and classified as non-diabetic, consistent with their absence of a
+confirmed diabetes diagnosis. After these exclusions, the complete-case
+sample for the primary analysis consisted of 244,039 respondents,
+including only respondents with complete data for all variables used in
+the analysis. A sensitivity analysis was conducted using the full sample
+of 246,022 respondents, with gestational diabetes coded as a separate
+category, to assess whether this exclusion meaningfully affected the
+primary results.
+
+## Outcome and Exposure Variables
+
+The outcome variable was `HeartDisease`, a binary variable indicating
+whether a respondent had ever been diagnosed with a heart attack. This
+variable was derived from the survey item `HadHeartAttack` and recoded
+as Yes = 1 and No = 0.
+
+The primary exposure variable was diabetes status, derived from the
+original four-level `HadDiabetes` variable. Diabetes status was recoded
+into a binary variable (Yes = 1, No = 0) for analysis. Respondents
+reporting gestational diabetes were excluded because gestational
+diabetes occurs during pregnancy and is clinically distinct from type 1
+and type 2 diabetes. Respondents reporting pre-diabetes or borderline
+diabetes were classified as non-diabetic because the primary analysis
+focused on diagnosed diabetes. This binary coding simplified
+interpretation of the association between diabetes and heart disease.
+
+## Covariates
+
+Covariates were selected based on established cardiovascular risk
+factors identified in the literature and the secondary research
+questions of interest. These included age category, sex, body mass index
+(BMI), smoking status, self-reported general health, physical activity,
+and race/ethnicity.
+
+Age category was treated as an ordered factor with 13 levels (18–24
+years through 80 years and older), using the youngest age group as the
+reference category. Sex was coded as a binary factor, with female as the
+reference category. Body mass index (BMI) was analyzed as a continuous
+variable and was also categorized into four groups (Underweight, Normal
+weight, Overweight, and Obese) using standard World Health Organization
+cutoffs for descriptive analyses. Smoking status was coded as a
+four-level factor, with never smoked as the reference category, followed
+by former smoker, current smoker every day, and current smoker some
+days. Self-reported general health was treated as an ordered five-level
+factor, with Excellent as the reference category and Poor representing
+the lowest level of health. Physical activity was coded as a binary
+factor, with no physical activity as the reference category. Race and
+ethnicity were coded as a five-level factor, with White, non-Hispanic as
+the reference category.
+
+Additional variables considered in supplementary analyses included sleep
+duration, alcohol use, history of depressive disorder, and difficulty
+walking.
+
+## Statistical Analysis
+
+Descriptive statistics were used to summarize the study population
+overall and stratified by heart disease status. Continuous variables
+were described using means and standard deviations, and categorical
+variables were summarized using frequencies and percentages. Univariable
+associations between heart disease and each covariate were assessed
+using chi-square tests for categorical variables and t-tests for
+continuous variables.
+
+Multivariable logistic regression was used to estimate adjusted odds
+ratios (ORs) with 95% confidence intervals (CIs) for the association
+between diabetes and heart disease, adjusting for age, sex, BMI, and
+smoking status. The primary logistic regression model was specified as:
+$$
+\begin{aligned}
+\text{logit}(P(\text{HeartDisease} = 1)) = \beta_0 
+&+ \beta_1(\text{HadDiabetes}) + \beta_2(\text{AgeCategory})+ \beta_3(\text{Sex}) \\
+&+ \beta_4(\text{BMI}) + \beta_5(\text{SmokerStatus})
+\end{aligned}
+$$
+
+where $\beta_1$ represents the difference in log odds of having heart
+disease between individuals with diabetes and those without diabetes,
+assuming the other predictors remain constant.
+
+Additional multivariable models were fit to address the secondary
+research questions, including a model examining physical activity
+adjusted for BMI and age, a model examining general health status
+adjusted for behavioral and clinical covariates, and a model including a
+multiplicative interaction term between smoking status and age category
+to formally test effect modification.
+
+Multicollinearity was assessed informally through pairwise correlations
+among covariates. Model fit was evaluated using the Hosmer-Lemeshow
+goodness-of-fit test, deviance and Pearson residual plots, and influence
+diagnostics based on Cook's distance and leverage (hat values). Model
+discrimination was evaluated using receiver operating characteristic
+(ROC) curve analysis and the area under the curve (AUC). The optimal
+classification threshold was identified using Youden's index to account
+for class imbalance in the outcome variable. Internal validation was
+conducted using bootstrap resampling with 200 iterations to estimate
+optimism in model performance. Subgroup analyses stratified by sex were
+conducted to assess whether the association between diabetes and heart
+disease differed between male and female respondents. A sensitivity
+analysis was conducted to evaluate the impact of excluding gestational
+diabetes cases on the primary effect estimate.
+
+All analyses were conducted in R (version 4.4.1), using the `tidyverse`
+package for data wrangling and preparation, `gtsummary` for descriptive
+tables, `glm()` for logistic regression, `broom` for model output
+extraction, `pROC` for ROC and AUC estimation, `corrplot` for
+correlation visualization, and `ResourceSelection` for the
+Hosmer-Lemeshow test. The full analysis was written in Quarto to ensure
+complete reproducibility, with all code provided in the appendix.
+
+# Results
+
+## Descriptive Statistics
+
+The complete-case sample for the primary analysis included 244.039
+respondents after excluding 1,983 individuals who reported gestational
+diabetes. Among these respondents, 13,435 (5.46%) reported a history of
+heart attack, indicating substantial class imbalance in the outcome
+variable. This type of class imbalance is common in population-based
+cardiovascular studies and was taken into account when evaluating model
+performance.
+
+@tbl-descriptive presents descriptive statistics for the study
+population overall and stratified by heart disease status. Respondents
+with heart disease were older on average and more frequently reported
+diabetes, current smoking, physical inactivity, and poorer self-rated
+general health compared to respondents without heart disease. Mean BMI
+was slightly higher among respondents with heart disease (29.5 vs.
+28.6), while sleep duration did not differ meaningfully between groups
+(7.04 versus 7.02 hours). These descriptive findings indicate clear
+differences in cardiovascular risk profiles between respondents with and
+without heart disease, supporting the need for multivariable adjustment
+in subsequent analyses.
+
+```{r}
+#| label: tbl-descriptive
+#| tbl-cap: "Descriptive Characteristics of Study Population, Overall and Stratified by Heart Disease Status"
+#| echo: false
+#| latex-options: hold_position
+
+heart_complete |>
+  select(HeartDisease_f, HadDiabetes_binary, AgeCategory, Sex, BMI,
+         BMICategory, SmokerStatus, PhysicalActivities, GeneralHealth,
+         RaceEthnicityCategory, SleepHours, AlcoholDrinkers,
+         HadDepressiveDisorder, DifficultyWalking) |>
+
+  # Create the summary table grouped by heart disease status
+  tbl_summary(
+    # Group the summary by heart disease status
+    by = HeartDisease_f,
+
+    # Display more descriptive variable labels
+    label = list(
+      HadDiabetes_binary ~ "Diabetes",
+      AgeCategory ~ "Age Category",
+      BMICategory ~ "BMI Category",
+      SmokerStatus ~ "Smoking Status",
+      PhysicalActivities ~ "Physical Activity",
+      GeneralHealth ~ "General Health",
+      RaceEthnicityCategory ~ "Race/Ethnicity",
+      SleepHours ~ "Sleep Hours",
+      AlcoholDrinkers ~ "Alcohol Use",
+      HadDepressiveDisorder ~ "Depressive Disorder",
+      DifficultyWalking ~ "Difficulty Walking"
+    ),
+
+    # Display mean and sd for continuous variables
+    # and count and percentage for categorical variables
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+
+    # Round continuous variables to one decimal places
+    digits = all_continuous() ~ 1,
+
+    # Do not include missing values in the table
+    missing = "no"
+  ) |>
+
+  # Add a column summarizing all participants for each group
+  add_overall() |>
+  # Add p-values comparing heart disease groups
+  add_p() |>
+  # Bold variable labels
+  bold_labels() |>
+  # Bold statistically significant p-values (p < 0.05)
+  bold_p(t = 0.05) |>
+  as_flex_table() |>
+  flextable::font(fontname = "Times New Roman", part = "all") |>
+  # Fix the table layout so column widths remain consistent
+  flextable::set_table_properties(layout = "fixed") |>
+  # Set the width of each column (in inches) to help the table fit on the page
+  flextable::width(width = c(2.3, 1.1, 1.1, 1.1, 0.9), unit = "in")
+
+```
+
+## Univariable Associations
+
+Initial univariable analyses showed that all covariates were
+significantly associated with heart disease status. The largest
+chi-square statistics were observed for general health ($\chi^2$ =
+9,893.9), age category ($\chi^2$ = 7,925.1), and difficulty walking
+($\chi^2$ = 6,286.6), indicating strong associations with heart disease.
+Diabetes was also strongly associated with heart disease ($\chi^2$ =
+5,193.4, p \< 0.001), supporting the primary hypothesis. Smoking status
+($\chi^2$ = 2,241.3), physical activity ($\chi^2$ = 1,701.6), and
+alcohol use ($\chi^2$ = 1,353.2) were also significantly associated with
+heart disease. Although race/ethnicity ($\chi^2$ = 195.92) and
+depressive disorder ($\chi^2$ = 138.0) had smaller chi-square
+statistics, both remained statistically significant.
+
+Univariable logistic regression produced crude odds ratios for each
+covariate before adjustment for potential confounders
+(@tbl-univariable). Diabetes was associated with higher odds of heart
+disease (Crude OR = 3.69, 95% CI: 3.55–3.83). A strong age-related
+pattern was observed, with the odds of heart disease increasing from
+1.11 among respondents aged 25–29 years to 41.21 among those aged 80
+years and older, compared with the 18–24-year reference group.
+Self-reported general health showed a similar trend, with crude odds
+ratios increasing from 2.01 for respondents reporting very good health
+to 18.83 for those reporting poor health, compared to those in excellent
+health. Respondents who reported engaging in physical activity had lower
+odds of heart disease (OR = 0.47), indicating that physically active
+respondents were less likely to have heart disease. The univariable
+results demonstrate consistent and strong associations between heart
+disease and key demographic, behavioral, and clinical risk factors,
+supporting their inclusion in the multivariable models.
+
+```{r}
+#| label: tbl-univariable
+#| echo: false
+#| latex-options: hold_position
+
+# Covariates for univariate logistic regression
+covariates <- c(
+  "HadDiabetes_binary", "AgeCategory", "Sex", "BMI",
+  "BMICategory", "SmokerStatus", "PhysicalActivities",
+  "GeneralHealth", "RaceEthnicityCategory"
+)
+
+# Fit one logistic regression model for each covariate using lapply()
+# var is each covariate being looped through one at a time
+crude_models <- lapply(covariates, function(var) {
+  # Create model formula: HeartDisease ~ covariate
+  formula <- as.formula(paste("HeartDisease ~", var))
+  
+  # glm() to fit logistic regression model
+  model <- glm(
+    formula,
+    data = heart,
+    family = binomial
+  )
+  
+  # Extract crude odds ratios, confidence intervals, and p-values
+  tidy(model, exponentiate = TRUE, conf.int = TRUE) |>
+    # Remove the intercept row
+    filter(term != "(Intercept)") |>
+    # Add the covariate name to the results
+    # This creates a new column called "covariate"
+    mutate(covariate = var)
+})
+
+# Combine all model results into one data frame using bind_rows()
+crude_results <- bind_rows(crude_models)
+
+# Results table
+crude_results |>
+  # Strip out messy covariate name prefixes from the levels to fix overlapping
+  mutate(term = stringr::str_remove(term, covariate)) |>
+  # Rename RaceEthnicityCategory to Race/Ethnicity
+  mutate(covariate = ifelse(covariate == "RaceEthnicityCategory", "Race/Ethnicity", covariate)) |>
+  # Clean up formatting of column values (removes underscores)
+  mutate(covariate = stringr::str_replace_all(covariate, "_", " ")) |>
+  # Select relevant columns
+  select(covariate, term, estimate, conf.low, conf.high, p.value) |>
+  # Round values
+  mutate(
+    estimate = round(estimate, 2),
+    conf.low = round(conf.low, 2),
+    conf.high = round(conf.high, 2),
+    p.value = ifelse(p.value <0.001, "<0.001", round(p.value, 3))
+  ) |>
+  # Display as a clean formatted table
+  knitr::kable(
+    col.names = c("Covariate", "Term", "Crude OR",
+                  "95% CI Lower", "95% CI Upper", "P-value"),
+    caption = "Crude Odds Ratios from Univariable Logistic Regression"
+  )
+```
+
+## Primary Model
+
+The primary multivariable logistic regression model examined whether
+diabetes was associated with higher odds of heart disease after
+adjusting for age, sex, BMI, and smoking status. Adults with diabetes
+had significantly higher odds of heart disease compared to non-diabetic
+adults (adjusted OR = 2.34, 95% CI: 2.25–2.44, p \< 0.001),supporting
+the primary hypothesis. This adjusted estimate was meaningfully lower
+than the crude OR of 3.69 observed in the univariable analysis,
+indicating that age, sex, BMI, and smoking status accounted for a
+portion of the unadjusted association between diabetes and heart
+disease.
+
+Age remained the strongest predictor of heart disease after adjustment,
+with odds increasing steadily across age categories and reaching the
+highest level among respondents aged 80 years and older compared with
+the 18–24 reference group (OR = 33.40). Male sex was associated with
+higher odds of heart disease relative to female sex (OR = 2.00). Current
+smoking was also strongly associated with heart disease, with higher
+odds observed among daily smokers (OR = 2.72) and some-days smokers (OR
+= 2.49), while former smokers also showed elevated odds (OR = 1.62)
+compared with never smokers. BMI showed a modest positive association
+with heart disease, with slightly increased odds per unit increase (OR =
+1.02). The primary model identified age, sex, smoking status, BMI, and
+diabetes as independent predictors of heart disease, with a strong and
+consistent age gradient observed across all models.
+
+@fig-forest displays adjusted odds ratios and 95% confidence intervals
+from the primary model. After adjustment, all covariates remained
+significantly associated with heart disease, as their confidence
+intervals for diabetes, age, sex, and current smoking status did not
+include the null value of 1.
+
+```{r}
+#| label: fig-forest
+#| fig-cap: "Adjusted Odds Ratios from Primary Multivariable Model"
+#| echo: false
+
+# Create a forest plot
+library(dplyr)
+
+# Extract coefficient table from primary model
+coef_table <- summary(model_rq1)$coefficients
+
+# Odds ratios
+OR <- exp(coef(model_rq1))
+
+# 95% confidence intervals for odds ratios
+lower <- exp(coef(model_rq1) - 1.96 * coef_table[, "Std. Error"])
+upper <- exp(coef(model_rq1) + 1.96 * coef_table[, "Std. Error"])
+
+# Create data frame for forest plot
+forest_data <- data.frame(
+  variable = names(OR),
+  OR = OR,
+  lower = lower,
+  upper = upper
+)
+
+# Remove intercept since it is not interpreted as a risk factor
+forest_data <- forest_data[forest_data$variable != "(Intercept)", ]
+
+# Rename terms for plotting
+forest_data$variable <- dplyr::recode(
+  forest_data$variable,
+  "HadDiabetes_binaryYes" = "Diabetes: Yes",
+  "SexMale" = "Sex: Male",
+  "BMI" = "BMI (continuous)",
+  "SmokerStatusFormer smoker" = "Smoking: Former",
+  "SmokerStatusCurrent smoker - now smokes every day" =
+    "Smoking: Current (daily)",
+  "SmokerStatusCurrent smoker - now smokes some days" =
+    "Smoking: Current (some days)"
+)
+# Rename age categories using gsub()
+forest_data$variable <- gsub(
+  "AgeCategory",
+  "Age: ",
+  forest_data$variable
+)
+
+library(ggplot2)
+
+# Forest plot of adjusted odds ratios and 95% confidence intervals
+ggplot(
+  forest_data,
+  aes(
+    x = OR,
+    y = reorder(variable, OR)   # Order variables by odds ratio
+  )
+) +
+  geom_point(size = 2, color = "steelblue") +
+  # Add 95% confidence interval bars
+  geom_errorbarh(
+    aes(xmin = lower, xmax = upper),
+    height = 0.2
+  ) +
+  # Reference line at OR = 1 (no association)
+  geom_vline(
+    xintercept = 1,
+    linetype = "solid",
+    color = "red"
+  ) +
+  # Display odds ratios on a log scale for easier comparison
+  # effects below and above 1 are shown symmetrically
+  scale_x_log10() +
+  labs(
+    title = "Forest Plot of Adjusted Odds Ratios",
+    subtitle = "Primary Logistic Regression Model",
+    x = "Odds Ratio (95% CI, log scale)",
+    y = "Variable"
+  ) +
+  theme_minimal()
+```
+
+## Secondary Models
+
+For the second research question, physical activity remained
+independently associated with heart disease after adjustment for age and
+BMI in the multivariable logistic regression model. Respondents who
+reported engaging in physical activity had lower odds of heart disease
+compared with those who did not (OR = 0.60, 95% CI: 0.58–0.62, p \<
+0.001). BMI showed a small but statistically significant positive
+association with heart disease (OR = 1.02 per unit increase), and the
+age gradient remained strong across all categories.
+
+For the third research question, the association between smoking status
+and heart disease varied across age groups in the multivariable logistic
+regression model, providing evidence of effect modification by age.
+Specifically, the interaction terms for current daily smoking in older
+age categories were statistically significant and indicated a weaker
+association between smoking and heart disease in older adults compared
+with younger adults. This was most evident in ages 70–74 (OR = 0.28, 95%
+CI: 0.14–0.64), 75–79 (OR = 0.21, 95% CI: 0.10–0.49), and 80 years or
+older (OR = 0.18, 95% CI: 0.08–0.42). These interaction effects below 1
+suggest that the increase in odds of heart disease associated with
+current daily smoking is smaller in older age groups relative to the
+reference age category of 18-24.
+
+For the fourth research question, general health status remained
+strongly associated with heart disease in the multivariable logistic
+regression model after adjustment for age, sex, BMI, smoking status,
+diabetes, and physical activity. Compared with excellent health, the
+odds of heart disease increased steadily across categories (very good:
+OR = 1.67; good: OR = 3.04; fair: OR = 5.66; poor: OR = 9.69; all p \<
+0.001). Although these estimates were lower than in unadjusted analyses,
+the association remained strong after adjustment.
+
+## Model Diagnostics
+
+Multicollinearity among covariates was assessed using pairwise
+correlations. All pairwise correlations were below 0.45
+(@fig-correlation) with the strongest observed between physical health
+days and difficulty walking (r = 0.43). Diabetes showed modest positive
+correlations with heart disease (r = 0.15) and BMI (r = 0.20),
+consistent with the known relationship between diabetes, obesity, and
+cardiovascular disease and supporting BMI's inclusion as a confounder in
+the primary model. No correlations were large enough to indicate
+concerning multicollinearity within the logistic regression framework.
+
+```{r}
+#| label: fig-correlation
+#| fig-cap: "Correlation Matrix of Numeric and Binary Covariates"
+#| echo: false
+
+# Convert binary Yes/No variables to numeric for correlation converted to 1/0
+
+cor_vars <- heart |>
+  mutate(
+    PhysicalActivities_num = if_else(PhysicalActivities == "Yes", 1, 0),
+    AlcoholDrinkers_num = if_else(AlcoholDrinkers == "Yes", 1, 0),
+    HadDepressiveDisorder_num = if_else(HadDepressiveDisorder == "Yes", 1, 0),
+    DifficultyWalking_num = if_else(DifficultyWalking == "Yes", 1, 0),
+    HadDiabetes_num = if_else(HadDiabetes_binary == "Yes", 1, 0),
+    Sex_num = if_else(Sex == "Male", 1, 0)
+  ) |>
+  # Keep variables used in the correlation analysis
+select(
+  HeartDisease, BMI, SleepHours, PhysicalHealthDays, MentalHealthDays,
+  # binary variables converted to 0/1
+  PhysicalActivities_num, AlcoholDrinkers_num, HadDepressiveDisorder_num,
+  DifficultyWalking_num, HadDiabetes_num, Sex_num
+)
+
+# Compute the correlation matrix
+cor_matrix <- cor(cor_vars, use = "complete.obs")
+
+# Plot the correlation heatmap
+corrplot(
+  cor_matrix,
+  method = "color",
+  # Show as an upper triagular matrix
+  type = "upper",
+
+  # Smaller labels for variables
+  tl.cex = 0.6,
+  tl.col = "black",
+
+  # Smaller correlation numbers
+  number.cex = 0.5,
+  addCoef.col = "black",
+  
+  # Rotate labels for more space
+  tl.srt = 45,
+
+  col = colorRampPalette(c("royalblue3", "white", "red3"))(200),
+  title = "Correlation Matrix of Numeric and Binary Variables",
+  # Increase margins slightly
+  mar = c(0, 0, 2, 0)
+)
+```
+
+The Hosmer-Lemeshow goodness-of-fit test was statistically significant
+($\chi^2$ = 99.41, df = 8, p \< 0.001), suggesting the model doesn't fit
+the data perfectly. This indicates some lack of fit between observed and
+predicted probabilities. Given the large sample size (n = 244,039), this
+result was expected, as even small differences between observed and
+predicted values can produce statistically significant results in large
+datasets. Deviance and Pearson residual plots (@fig-residuals) showed
+the two-band structure typical of logistic regression with a binary,
+imbalanced outcome, with residual magnitude decreasing as fitted
+probabilities increased, indicating relatively better fit among
+observations assigned higher predicted probabilities of heart disease.
+
+```{r}
+#| label: fig-residuals
+#| fig-cap: "Deviance and Pearson Residuals vs. Fitted Values"
+#| fig-subcap: 
+#|   - "Deviance Residuals"
+#|   - "Pearson Residuals"
+#| layout-ncol: 2
+#| echo: false
+
+ggplot(model_rq1_diag, aes(x = fitted, y = deviance_resid)) +
+  geom_point(alpha= 0.1, size = 1) +
+  geom_hline( yintercept = 0, linetype = "dashed", color = "royalblue") +
+  labs(
+    title = "Deviance residuals vs Fitted Values",
+    x = "Fitted Values",
+    y = "Deviance Residuals"
+  ) +
+  theme_minimal()
+
+ggplot(model_rq1_diag, aes(x = fitted, y = pearson_resid)) +
+  geom_point(alpha= 0.1, size = 1) +
+  geom_hline( yintercept = 0, linetype = "dashed", color = "purple") +
+  labs(
+    title = "Pearson residuals vs Fitted Values",
+    x = "Fitted Values",
+    y = "Pearson Residuals"
+  ) +
+  theme_minimal()
+```
+
+Influence diagnostics identified 13,471 observations (5.52%) exceeding
+the standard Cook's distance cutoff of 4/n at around
+$1.64 \times 10^{-5}$ (@fig-cooks). Refitting the model after excluding
+these observations resulted in coefficients shrinking toward the null
+(OR = 1) and odds ratios moving toward 1, indicating that these
+observations contributed meaningful information to the model rather than
+disproportionately distorting it. All observations were therefore
+retained in the final model. Leverage diagnostics identified 21,713
+observations (8.90%) exceeding the standard hat value cutoff of 2p/n at
+0.0001557128 (@fig-hatvalues). However, leverage alone does not indicate
+whether an observation meaningfully affects model estimates, and this
+role is better captured by Cook's distance.
+
+Taken together, these diagnostic assessments provided no evidence of
+substantial violations that would compromise interpretation of the
+primary logistic regression model.
+
+```{r}
+#| label: fig-cooks
+#| fig-cap: "Cook's Distance for Primary Model"
+#| echo: false
+
+# Cutoff value 
+n <- nrow(heart_complete)
+cutoff <- 4 / n
+
+# Cook's Distance Plot
+ggplot(
+  influence_measures,
+  aes(x = seq_along(cooks), y = cooks)
+) +
+  geom_point(alpha = 0.2, size = 0.3) +
+  geom_hline(
+    yintercept = cutoff,
+    linetype = "solid",
+    color = "red"
+  ) +
+  labs(
+    title = "Cook's Distance for Primary Model",
+    x = "Observation Index",
+    y = "Cook's Distance"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#| label: fig-hatvalues
+#| fig-cap: "Hat Values for Primary Model"
+#| echo: false
+
+# Hat cutoff value
+hat_cutoff <- 2 * length(coef(model_rq1)) / n
+
+# Hat value plot
+ggplot(influence_measures, aes(x = seq_along(hat), y = hat)) +
+  geom_point(alpha = 0.2, size = 0.3) +
+  geom_hline(
+    yintercept = hat_cutoff,
+    linetype = "solid",
+    color = "red"
+  ) +
+  labs(
+    title = "Hat Values for Primary Model",
+    x = "Observation Index",
+    y = "Hat Value"
+  ) +
+  theme_minimal()
+```
+
+## Model Performance
+
+Model discrimination was evaluated using receiver operating
+characteristic (ROC) curve analysis. The primary model demonstrated good
+discrimination between respondents with and without heart disease (AUC =
+0.786), while the full model, which included additional behavioral and
+clinical covariates, showed improved discrimination (AUC = 0.823)
+(@fig-roc). Although the full model achieved higher discrimination, the
+primary model remained the focus of this analysis, as it was specified
+to directly address the primary research question regarding diabetes and
+heart disease after adjustment for age, sex, BMI, and smoking status.
+
+```{r}
+#| label: fig-roc
+#| fig-cap: "ROC Curves for Primary and Full Models"
+#| echo: false
+
+ggroc(list("Primary Model" = roc_rq1, "Full Model" = roc_full)) +
+  geom_abline( intercept = 1, slope = 1,
+               linetype = "dashed", color = "purple4") +
+  # Reference line representing random classification of heart disease status
+  labs(title = "ROC Curves: Primary vs. Full Model",
+       x = "Specificity",
+       y= "Sensitivity") +
+  theme_minimal()
+```
+
+Given the substantial class imbalance in the outcome variable, the
+default classification threshold (0 = No heart disease, 1 = Yes heart
+disease) of 0.50 was evaluated alongside an optimal threshold identified
+using Youden’s index. At the default threshold, the model correctly
+identified only 1 of 13,379 heart disease cases (sensitivity = 0.0001),
+while correctly classifying nearly all non-cases (specificity = 0.999),
+confirming that the default threshold is inappropriate for this outcome
+prevalence (@tbl-cutoff-default). At the Youden-optimal threshold
+(0.056), sensitivity improved substantially to 0.772, correctly
+identifying 10,334 of 13,379 heart disease cases, with a corresponding
+decrease in specificity to 0.667 (@tbl-cutoff-opt). This threshold
+provides a better balance between sensitivity and specificity given the
+class imbalance in the data.
+
+```{r}
+#| label: tbl-cutoff-default
+#| tbl-cap: "Confusion Matrix Using Default Cutoff (0.50); 1 = Yes (Heart Disease), 0 = No"
+#| echo: false
+
+# Predicted probabilities
+pred_prob <- predict(model_rq1, type = "response")
+
+# Confusion matrix using default cutoff of 0.50
+pred_50 <- ifelse(pred_prob >= 0.50, 1, 0)
+
+confusion_50 <- table(
+  Predicted = pred_50,
+  Actual = heart_complete$HeartDisease
+)
+
+# Create formatted table 
+knitr::kable(
+  as.data.frame.matrix(confusion_50)
+)
+```
+
+```{r}
+#| label: tbl-cutoff-opt
+#| tbl-cap: "Confusion Matrix Using Optimal Cutoff (0.056); 1 = Yes (Heart Disease), 0 = No"
+
+#| echo: false
+
+# Extract optimal cutoff
+opt_cutoff <- as.numeric(youden["threshold"])
+
+# Confusion matrix using optimal cutoff
+pred_opt <- ifelse(pred_prob >= opt_cutoff, 1, 0)
+
+confusion_opt <- table(
+  Predicted = pred_opt,
+  Actual = heart_complete$HeartDisease
+)
+
+knitr::kable(
+  as.data.frame.matrix(confusion_opt)
+)
+```
+
+Internal validation was performed using bootstrap resampling with 200
+iterations (@fig-bootstrap). The apparent AUC from the original model
+was around 0.786, and the bootstrap-derived mean AUC was nearly
+identical, resulting in an optimism estimate of 0.00016. The small
+optimism estimate suggests little evidence of overfitting, indicating
+that the model would be expected to perform similarly in comparable
+populations.
+
+These findings indicate that the primary model provides reliable
+discrimination with little evidence of overfitting, supporting its use
+for evaluating the association between diabetes and heart disease.
+
+```{r}
+#| label: fig-bootstrap
+#| fig-cap: "Bootstrap Distribution of AUC (200 Resamples)"
+#| echo: false
+
+# Apparent AUC
+apparent_auc <- as.numeric(auc(roc_rq1))
+
+# Distribution of bootstrap AUC values
+boot_auc_df <- data.frame(AUC = boot_auc)
+
+# Plot using ggplot
+ggplot(boot_auc_df, aes(x = AUC)) +
+  geom_histogram(
+    bins = 20,
+    color = "black",
+    fill = "steelblue"
+  ) +
+  # Add a dashed reference line for the apparent AUC
+  geom_vline(
+    xintercept = apparent_auc,
+    color = "red",
+    linetype = "dashed"
+  ) +
+  labs(
+    title = "Distribution of Bootstrap AUC Values",
+    subtitle = "200 Bootstrap Samples",
+    xlab = "AUC",
+    ylab = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+## Subgroup and Sensitivity Analyses
+
+To assess whether the association between diabetes and heart disease
+differed by sex, the primary model was refit separately for female and
+male respondents, adjusting for age, BMI, and smoking status. The
+association between diabetes and heart disease was observed in both
+subgroups. Among female respondents, diabetes was associated with
+approximately 2.63 times the odds of heart disease (95% CI: 2.47–2.81)
+compared with non-diabetic females. Among male respondents, diabetes was
+associated with approximately 2.17 times the odds of heart disease (95%
+CI: 2.06–2.29) compared with non-diabetic males (@tbl-subgroup). The
+point estimate was somewhat higher among females, suggesting a possibly
+stronger association between diabetes and heart disease in this
+subgroup.
+
+```{r}
+#| label: tbl-subgroup
+#| echo: false
+
+# Female diabetes OR
+female_coef <- summary(model_female)$coefficients
+
+female_or <- exp(coef(model_female)["HadDiabetes_binaryYes"]) 
+
+female_lower <- exp(coef(model_female)["HadDiabetes_binaryYes"] - 
+                   1.96 * female_coef["HadDiabetes_binaryYes", "Std. Error"])
+
+female_upper <- exp(coef(model_female)["HadDiabetes_binaryYes"] + 
+                   1.96 * female_coef["HadDiabetes_binaryYes", "Std. Error"])
+
+# Male diabetes OR
+male_coef <- summary(model_male)$coefficients
+
+male_or <- exp(coef(model_male)["HadDiabetes_binaryYes"]) 
+
+male_lower <- exp(coef(model_male)["HadDiabetes_binaryYes"] - 
+                   1.96 * male_coef["HadDiabetes_binaryYes", "Std. Error"])
+
+male_upper <- exp(coef(model_male)["HadDiabetes_binaryYes"] + 
+                   1.96 * male_coef["HadDiabetes_binaryYes", "Std. Error"])
+
+# Create comparison table for ORs and CIs for both sexes
+subgroup_results <-data.frame( Sex = c("Female", "Male"),
+                               OR = c(female_or, male_or),
+                               CI_Lower = c(female_lower, male_lower),
+                               CI_Upper = c(female_upper, male_upper)
+                               )
+# modify columns with mutate()
+subgroup_results |>
+  mutate(OR = round(OR, 3),
+         CI_Lower = round(CI_Lower, 3),
+         CI_Upper = round(CI_Upper, 3),
+         ) |>
+  # Display subgroup results in a formatted table
+  knitr::kable(
+    caption = "Association Between Diabetes and Heart disease Stratified by Sex")
+```
+
+To evaluate the impact of excluding gestational diabetes cases from the
+primary analysis, a sensitivity analysis was conducted using the full
+sample with gestational diabetes coded as a separate category. The
+adjusted odds ratio for diabetes was nearly identical between the
+primary model (OR = 2.339, 95% CI: 2.25–2.44) and the sensitivity model
+(OR = 2.34, 95% CI: 2.25–2.44) (@tbl-sensitivity), indicating that the
+exclusion of gestational diabetes cases did not meaningfully affect the
+primary findings.
+
+Together, these subgroup and sensitivity analyses support the robustness
+of the primary finding that diabetes is independently associated with
+higher odds of heart disease, while also suggesting that this
+association may vary modestly by sex.
+
+```{r}
+#| label: tbl-sensitivity
+#| echo: false
+
+sensitivity_coeff <- summary(model_sensitivity)$coefficients
+
+# Primary model OR and 95% CI
+# With HadDiabetes_binary (No/Yes)
+primary_or <- exp(coef(model_rq1)["HadDiabetes_binaryYes"]) 
+
+primary_lower <- exp(coef(model_rq1)["HadDiabetes_binaryYes"] - 
+                   1.96 * summary(model_rq1)$coefficients["HadDiabetes_binaryYes", "Std. Error"])
+
+primary_upper <- exp(coef(model_rq1)["HadDiabetes_binaryYes"] + 
+                   1.96 * summary(model_rq1)$coefficients["HadDiabetes_binaryYes", "Std. Error"])
+
+# Sensitivity model OR and 95% CI
+# With HadDiabetes_3level (No/Yes/Gestational)
+sensitivity_or <- exp(coef(model_sensitivity)["HadDiabetes_3levelYes"]) 
+
+sensitivity_lower <- exp(coef(model_sensitivity)["HadDiabetes_3levelYes"] - 
+                   1.96 * sensitivity_coeff["HadDiabetes_3levelYes", "Std. Error"])
+
+sensitivity_upper <- exp(coef(model_sensitivity)["HadDiabetes_3levelYes"] + 
+                   1.96 * sensitivity_coeff["HadDiabetes_3levelYes", "Std. Error"])
+
+# Create comparison table for ORs and CIs for Primary vs Sensitivity model
+subgroup_results <- data.frame(
+  Model = c(
+    "Primary (gestational excluded)",
+    "Sensitivity (gestational included)"
+  ),
+  OR_model = c(primary_or, sensitivity_or),
+  CI_Lower_model = c(primary_lower, sensitivity_lower),
+  CI_Upper_model = c(primary_upper, sensitivity_upper)
+)
+
+# Remove names of the variables in the formatted table
+rownames(subgroup_results) <- NULL
+
+subgroup_results |>
+  mutate(
+    OR_model = round(OR_model, 3),
+    CI_Lower_model = round(CI_Lower_model, 3),
+    CI_Upper_model = round(CI_Upper_model, 3)
+  ) |>
+  # Display sensitivity analysis results in a formatted table
+  knitr::kable(
+    caption = "Sensitivity Analysis: Diabetes OR with and without Gestational Diabetes"
+  )
+```
+
+# Discussion
+
+## Summary of Main Findings
+
+This study examined the association between diabetes and heart disease
+using 2022 BRFSS data from 244.039 U.S. adults. consistent with the
+primary hypothesis, adults with diabetes had significantly higher odds
+of heart disease compared to non-diabetic adults (adjusted OR = 2.34,
+95% CI: 2.25–2.44) after adjusting for age, sex, BMI, and smoking
+status. This association remained stable in a sensitivity analysis
+including gestational diabetes cases and was observed in both female and
+male subgroups, though the point estimate was somewhat higher among
+females.
+
+Findings from the secondary analyses were also consistent with their
+respective hypotheses. Physical inactivity was associated with higher
+odds of heart disease after adjusting for BMI and age. A significant
+interaction between smoking and age was observed indicating that the
+association between current daily smoking and heart disease varied
+across groups. The effect of current daily smoking on the odds of heart
+disease was greater in younger adults than in older adults. General
+health status showed a clear ordinal gradient, with progressively higher
+odds of heart disease as self-reported health worsened from very good to
+poor, relative to excellent health, even after adjustment for behavioral
+and clinical covariates. The primary model demonstrated good
+discrimination (AUC = 0.786) with minimal evidence of overfitting based
+on bootstrap internal validation.
+
+## Comparison to Existing Literature
+
+The adjusted odds ratio for diabetes in the primary model was 2.34 (95%
+CI: 2.25–2.43), meaning that respondents with diabetes had more than
+twice the odds of heart disease compared with those without diabetes
+after adjustment for age, sex, BMI, and smoking status. This result is
+similar to the findings of Yang et al., who reported an adjusted odds
+ratio of 2.09 (95% CI: 1.72–2.54) using 2015 BRFSS data [@yang2019].
+Their estimate was slightly lower, which may be due to differences in
+the variables included in the model. In addition to demographic factors,
+Yang et al. adjusted for factors such as stroke, depression, diet, and
+physical activity. Despite these differences, both studies found a
+strong positive association between diabetes and heart disease.
+
+For physical Activity and heart disease, Shah et al. combined smoking,
+alcohol use, and physical inactivity into a single behavioral risk score
+and found that adults with two or more risk factors had 1.53 times the
+odds of heart attack compared with those with no risk factors
+[@shah2025]. Although the present study examined physical activity
+separately, the results point in the same direction. Physically active
+adults had lower odds of heart disease (OR = 0.60), indicating a
+protective effect of physical activity. Equivalently, physical
+inactivity remained positively associated with heart disease risk,
+consistent with the findings of Shah et al.
+
+For smoking and age, Yathindra et al. (2025) found that younger smokers
+aged 18 to 24 had the highest odds of angina (OR = 4.50), with the
+association decreasing steadily across age groups to an OR of 1.11 among
+adults aged 65 and older [@yathindra2025]. A similar pattern was
+observed in this research question, where the association between
+smoking and heart disease became weaker in older age groups. One
+difference is that Yathindra et al. used angina as the outcome rather
+than heart disease, which may help explain their lower overall odds
+ratios. Despite this difference, both studies suggest that smoking has a
+stronger relative association with cardiovascular disease among younger
+adults than among older adults.
+
+None of the studies reviewed specifically examined self-reported general
+health status as a predictor of heart disease using BRFSS data, which
+makes direct comparisons difficult. In the present study, the odds of
+heart disease increased steadily as self-reported health worsened,
+ranging from 1.67 times higher odds among respondents reporting very
+good health to 9.69 times higher odds among those reporting poor health,
+compared with respondents reporting excellent health. This suggests that
+self-rated health may be a useful indicator of cardiovascular risk.
+Additional studies would be needed to determine whether a similar
+pattern is observed in other BRFSS years or national health datasets.
+
+The age gradient observed here is consistent with published BRFSS
+literature. Shah et al. reported heart attack ORs increasing from 1.91
+at age 25–34 to 11.22 at age 65 and older, both lower than the estimates
+here, which likely reflects the broader age groupings they used
+[@shah2025]. The adjusted OR for male sex in this study (OR = 2.00 in
+primary model) is close to the 2.15 reported by Shah et al . and
+consistent with Leal et al., who found sex to be a significant predictor
+of CHD in 2020 BRFSS data [@shah2025; @leal2024].
+
+Comparisons across studies should be interpreted with caution because
+the analyses were conducted using different BRFSS survey years (2015,
+2020, 2022, 2023, and 2025), different cardiovascular outcome
+definitions (heart attack, angina, or coronary heart disease), and
+different sets of adjustment variables. Despite these differences, the
+overall findings were consistent, with diabetes, smoking, physical
+inactivity, older age, and male sex all associated with higher odds of
+cardiovascular disease among U.S. adults.
+
+## Limitations
+
+Limitations should be considered when interpreting the findings of this
+study.
+
+Although the multivariable model adjusted for age, sex, BMI, smoking
+status, and other covariates, unmeasured confounders may still influence
+the observed associations. Variables such as cholesterol levels, blood
+pressure, family history of heart disease, and medication use were not
+available in this dataset and could account for part of the association
+between diabetes and heart disease. As a result, the adjusted odds
+ratios reported here should not be interpreted as causal estimates,
+since unmeasured factors may contribute to the observed association
+between diabetes and heart disease.
+
+All exposures and the outcome of heart disease were based on
+self-reported survey responses. Respondents were asked whether they had
+ever been told by a doctor that they had a heart attack, had diabetes,
+or engaged in physical activity, among other questions. Self-reported
+data are subject to recall bias and social desirability bias, and may
+result in misclassification of both the exposure and outcome.
+Individuals with undiagnosed diabetes or heart disease would be
+classified as not having these conditions, which could weaken the
+observed relationship between diabetes and heart disease and lead to an
+underestimate of the true association.
+
+The BRFSS is a telephone-based survey, which may underrepresent
+populations without reliable phone access, including lower-income
+adults, those experiencing homelessness, and non-English speakers. If
+these groups differ systematically in their cardiovascular risk
+profiles, the study sample may not fully representative of the U.S.
+adult population, and findings may not generalize to all subgroups
+equally.
+
+The BRFSS also collects information at a single point in time, so it is
+not possible to determine whether diabetes occurred before heart
+disease. Because the timing of these conditions is unknown, the observed
+association cannot be interpreted as a cause-and-effect relationship.
+For example, some individuals may have been diagnosed with diabetes only
+after receiving medical care for heart disease. Longitudinal studies
+that follow individuals over time would be needed to determine whether
+diabetes increases the risk of developing heart disease.
+
+The primary exposure, diabetes status, was recoded into a binary
+variable by excluding 1,983 respondents who reported gestational
+diabetes and combining pre-diabetes with no diabetes. Although the
+sensitivity analysis showed that this decision did not meaningfully
+change the primary odds ratio (2.339 vs. 2.340), diabetes status was
+simplified into broad categories that may not fully reflect differences
+in disease severity or clinical history.
+
+Taken together, these limitations suggest that even though the link
+between diabetes and heart disease is consistent across multiple
+sensitivity checks, it should still be interpreted as an association
+rather than proof of causation. It should be considered together with
+other cross-sectional and longitudinal studies.
+
+## Public Health Implications
+
+Diabetes was strongly associated with heart disease in this study, with
+adults with diabetes having 2.34 times the odds of heart disease
+compared with those without diabetes after adjustment for age, sex, BMI,
+and smoking status. Given the high prevalence of diabetes in the United
+States, this finding highlights the importance of diabetes prevention,
+early detection, and effective disease management as part of efforts to
+reduce the burden of cardiovascular disease.
+
+Several modifiable behavioral factors were also associated with heart
+disease. Current smoking was linked to higher odds of heart disease, and
+physically active adults had lower odds of heart disease than inactive
+adults. These findings support existing public health initiatives that
+encourage smoking prevention and regular physical activity as strategies
+for improving cardiovascular health and reducing disease risk.
+
+The strong gradient observed between self-reported general health and
+heart disease suggests that a simple self-rated health measure may
+provide useful information about cardiovascular risk. Individuals
+reporting fair or poor health had substantially higher odds of heart
+disease compared to those reporting excellent health. Because self-rated
+health is easy and inexpensive to collect, it may be a useful tool for
+identifying populations that could benefit from additional
+cardiovascular risk assessment and prevention efforts.
+
+These findings support continued efforts to improve diabetes prevention,
+early detection, and disease management. Public health strategies that
+promote healthy lifestyles and cardiovascular risk reduction among
+adults with diabetes may help reduce the burden of heart disease and
+improve population health outcomes.
+
+## Conclusion
+
+This study examined the association between diabetes and heart disease
+using 2022 BRFSS data from 244,039 U.S. adults, finding that diabetes
+was independently associated with more than twice the odds of heart
+disease after adjustment for age, sex, BMI, and smoking status. This
+finding was robust across a sensitivity analysis including gestational
+diabetes cases and across sex-stratified subgroup analyses, and was
+consistent with prior BRFSS-based research. Secondary analyses further
+showed that physical inactivity, current smoking, and poorer
+self-reported general health were each independently associated with
+higher odds of heart disease, while the association between smoking and
+heart disease weakened with increasing age.
+
+These findings reinforce diabetes as a key modifiable risk factor for
+cardiovascular disease and support continued public health emphasis on
+diabetes prevention, early detection, and management as strategies for
+reducing cardiovascular risk at the population level. While the
+cross-sectional design being at one point in time and reliance on
+self-reported data limit causal interpretation, the consistency of these
+findings with existing literature strengthens confidence in the observed
+associations. Future research using longitudinal data, which follows the
+same individuals over time and measures their health status at multiple
+time points, and more detailed clinical measures would help clarify how
+diabetes develops in relation to heart disease and further inform
+targeted prevention strategies.
+
+# References
+
+::: {#refs}
+:::
