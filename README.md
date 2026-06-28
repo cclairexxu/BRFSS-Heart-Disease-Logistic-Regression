@@ -12,5 +12,9 @@ Analyzed 246,000+ U.S. adult records from the 2022 CDC BRFSS dataset to examine 
 
 **Note:** The HTML file exceeds GitHub's preview size limit and cannot be viewed directly on GitHub. Please download the raw file to view the report.
 
+- [Heart_Disease_Analysis_Report.qmd](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart_Disease_Analysis_Report.qmd) - Quarto source file for the project report
+
+- [Heart_Disease_Analysis_Report.qmd](insert link) - PDF report on Heart disease diabetes
+
 - [references.bib](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/references_heart_disease.bib) – Bibliography file
 
