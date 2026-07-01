@@ -24,3 +24,5 @@ Analyzed 246,000+ U.S. adult records from the 2022 CDC BRFSS dataset to examine 
 
 - [references.bib](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/references_heart_disease.bib) – Bibliography file.
 
+## Additional Files
+[boot_auc.rds](insert link later) - Saved bootstrap AUC results (200 iterations) required to knit the report without rerunning the bootstrap loop.
