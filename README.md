@@ -10,7 +10,7 @@ Analyzed 246,000+ U.S. adult records from the 2022 CDC BRFSS dataset to examine 
   
 - [Heart Disease Analysis Code.html](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart_Disease_Analysis_Code.html) - Rendered HTML report containing the full analysis, code, results, tables, and figures.
 
-**Note:** The HTML file exceeds GitHub's preview size limit and cannot be viewed directly on GitHub. Please download the raw file to view the report.
+  - **Note:** The HTML file exceeds GitHub's preview size limit and cannot be viewed directly on GitHub. Please download the raw file to view the report.
 
 - [Heart_Disease_Analysis_Report.qmd](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart_Disease_Analysis_Report.qmd) - Quarto source file for the project report.
 
@@ -18,7 +18,7 @@ Analyzed 246,000+ U.S. adult records from the 2022 CDC BRFSS dataset to examine 
 
 - [Heart Disease Presentation Video.mp4](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart%20Disease%20Presentation%20Video.mp4) - 8-minute recorded walkthrough of the project covering background, methods, key findings, and public health implications.
 
-**Note:** The mp4 file exceeds GitHub's preview size limit and cannot be viewed directly on GitHub. Please download the raw file to view the video.
+  - **Note:** The mp4 file exceeds GitHub's preview size limit and cannot be viewed directly on GitHub. Please download the raw file to view the video.
 
 - [Heart Disease Presentation.pdf](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart%20Disease%20Presentation.pdf) - Slide deck summarizing the research questions, statistical methods, key findings, and public health implications of the analysis.
 
