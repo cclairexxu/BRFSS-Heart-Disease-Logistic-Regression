@@ -18,6 +18,8 @@ Analyzed 246,000+ U.S. adult records from the 2022 CDC BRFSS dataset to examine 
 
   - **Note:** The report may take some time to load in the browser, so downloading the PDF is recommended.
 
+-[Heart_Disease_Analysis_Report_compressed](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart_Disease_Analysis_Report_compressed.pdf) - Compressed version of the full report — loads faster, figures are still vector so they don't blur when you zoom in, same content as the original.
+
 - [Heart Disease Presentation Video.mp4](https://github.com/cclairexxu/BRFSS-Heart-Disease-Logistic-Regression/blob/main/Heart%20Disease%20Presentation%20Video.mp4) - 8-minute recorded walkthrough of the project covering background, methods, key findings, and public health implications.
 
   - **Note:** The mp4 file exceeds GitHub's preview size limit and cannot be viewed directly on GitHub. Please download the raw file to view the video.
